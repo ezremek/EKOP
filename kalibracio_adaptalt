@@ -1,0 +1,108 @@
+#include <SimpleFOC.h>
+#include <PciManager.h>
+#include <PciListenerImp.h>
+
+// SPI pins
+#define SCK 19
+#define MISO 26
+#define MOSI 4
+#define CS1 17  // Sensor 1
+#define CS2 18  // Sensor 2
+
+// Motor 1 setup (First SimpleFOC Shield)
+#define MOTOR1_A 25
+#define MOTOR1_B 13
+#define MOTOR1_C 27
+#define MOTOR1_EN 12
+
+// Motor 2 setup (Second SimpleFOC Shield)
+#define MOTOR2_A 16
+#define MOTOR2_B 5
+#define MOTOR2_C 23
+#define MOTOR2_EN 14
+
+// Magnetic Sensors
+MagneticSensorSPI sensor1 = MagneticSensorSPI(AS5048_SPI, CS1);
+MagneticSensorSPI sensor2 = MagneticSensorSPI(AS5048_SPI, CS2);
+
+// BLDC Motors
+BLDCMotor motor1 = BLDCMotor(11);
+BLDCMotor motor2 = BLDCMotor(11);
+
+// Drivers
+BLDCDriver3PWM driver1 = BLDCDriver3PWM(MOTOR1_A, MOTOR1_B, MOTOR1_C, MOTOR1_EN);
+BLDCDriver3PWM driver2 = BLDCDriver3PWM(MOTOR2_A, MOTOR2_B, MOTOR2_C, MOTOR2_EN);
+
+float stiffness = 1.0; // Spring stiffness gain
+float spike_threshold = 0.3; // Spike rejection threshold
+float filtered_delta = 0.0; // Filtered angle difference
+
+void setup() {
+    Serial.begin(115200);
+
+    // SPI sensor setup
+    SPI.begin(SCK, MISO, MOSI);
+    sensor1.init();
+    // sensor1.offset removed
+    // sensor1.direction removed  // Change to CCW if needed
+    sensor2.init();
+    // sensor2.offset removed
+    // sensor2.direction removed  // Change to CCW if needed
+
+    // Motor 1 setup
+    motor1.linkSensor(&sensor1);
+    driver1.voltage_power_supply = 12;
+    driver1.init();
+    motor1.linkDriver(&driver1);
+    motor1.controller = MotionControlType::torque;
+
+    motor1.voltage_limit = 7;
+    motor1.foc_modulation = FOCModulationType::SinePWM;
+    motor1.init();
+    motor1.sensor_direction = Direction::CCW;  // Based on your calibration
+    motor1.zero_electric_angle = -12345.0;         // From calibration output
+    motor1.initFOC(); // Replace 0.0 with real offset if known
+
+    // Motor 2 setup
+    motor2.linkSensor(&sensor2);
+    driver2.voltage_power_supply = 12;
+    driver2.init();
+    motor2.linkDriver(&driver2);
+    motor2.controller = MotionControlType::torque;
+
+    motor2.voltage_limit = 7;
+    motor2.foc_modulation = FOCModulationType::SinePWM;
+    motor2.init();
+    motor2.sensor_direction = Direction::CW;  // Based on your calibration
+    motor2.zero_electric_angle = 5.8625;          // From calibration output
+    motor2.initFOC(); // Replace 0.0 with real offset if known
+
+    Serial.println("Spring-linked motors with spike filtering ready!");
+    _delay(1000);
+}
+
+void loop() {
+    motor1.loopFOC();
+    motor2.loopFOC();
+
+    float raw_delta = motor2.shaft_angle - motor1.shaft_angle;
+
+    if (abs(raw_delta - filtered_delta) > spike_threshold) {
+        filtered_delta = raw_delta; // update immediately on spike
+    } else {
+        filtered_delta = 0.9 * filtered_delta + 0.1 * raw_delta; // light blend
+    }
+
+    float torque1 = stiffness * filtered_delta;
+    float torque2 = -stiffness * filtered_delta;
+
+    motor1.move(torque1);
+    motor2.move(torque2);
+
+    Serial.print("M1 Angle: "); Serial.print(motor1.shaft_angle);
+    Serial.print(" | M2 Angle: "); Serial.print(motor2.shaft_angle);
+    Serial.print(" | Raw Delta: "); Serial.print(raw_delta);
+    Serial.print(" | Filtered Delta: "); Serial.print(filtered_delta);
+    Serial.print(" | Torque1: "); Serial.print(torque1);
+    Serial.print(" | Torque2: "); Serial.println(torque2);
+} 
