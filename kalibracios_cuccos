@@ -1,0 +1,46 @@
+#include <SimpleFOC.h>
+
+#define SCK 19
+#define MISO 26
+#define MOSI 4
+
+// Motor 1 config
+#define CS     17  // <- change to 18 for motor2
+#define A_PIN  25  // <- change to 16
+#define B_PIN  13  // <- change to 5
+#define C_PIN  27  // <- change to 23
+#define EN_PIN 12  // <- change to 14
+
+MagneticSensorSPI sensor = MagneticSensorSPI(AS5048_SPI, CS);
+BLDCMotor motor = BLDCMotor(11);
+BLDCDriver3PWM driver = BLDCDriver3PWM(A_PIN, B_PIN, C_PIN, EN_PIN);
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  SPI.begin(SCK, MISO, MOSI);
+  sensor.init();
+
+  motor.linkSensor(&sensor);
+  driver.voltage_power_supply = 12;
+  driver.init();
+  motor.linkDriver(&driver);
+  motor.controller = MotionControlType::torque;
+  motor.voltage_limit = 7;
+  motor.foc_modulation = FOCModulationType::SinePWM;
+
+  motor.init();
+  motor.initFOC();  // Performs auto-alignment
+
+  Serial.println("Calibration complete.");
+  Serial.print("Zero electric angle: ");
+  Serial.println(motor.zero_electric_angle, 4);
+  Serial.print("Sensor direction: ");
+  Serial.println(motor.sensor_direction == Direction::CW ? "CW" : "CCW");
+}
+
+void loop() {
+  motor.loopFOC();
+  motor.move(0);
+}
